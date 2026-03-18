@@ -29,10 +29,12 @@ def initialize_rag():
 
     # BEST MODEL FOR RESUME + MALWARE ANALYSIS
     llm = ChatNVIDIA(
-        model="nvidia/llama-3.1-nemotron-70b-instruct",
+        model="deepseek-ai/deepseek-v3.2",
         api_key=NVIDIA_API_KEY,
-        temperature=0.6,
-        max_tokens=1024
+         temperature=1,
+        top_p=0.95,
+        max_tokens=8192,
+        extra_body={"chat_template_kwargs": {"thinking":False}},
     )
 
     embeddings = NVIDIAEmbeddings(
