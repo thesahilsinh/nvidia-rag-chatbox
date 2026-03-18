@@ -19,22 +19,20 @@ rag_chain = None
 def initialize_rag():
     global llm, retriever, rag_chain
     if rag_chain is not None:
-        return  # already initialized
+        return
 
     NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
     if not NVIDIA_API_KEY:
-        raise ValueError("NVIDIA_API_KEY environment variable is missing in Render!")
+        raise ValueError("NVIDIA_API_KEY environment variable is missing!")
 
-    print("🔑 Using NVIDIA API Key (starts with):", NVIDIA_API_KEY[:10] + "...")
+    print("🔑 NVIDIA API Key loaded")
 
-    # BEST MODEL FOR RESUME + MALWARE ANALYSIS
+    # DEEPSEEK-V3.2 — Your requested model
     llm = ChatNVIDIA(
-        model="deepseek-ai/deepseek-v3.2",
+        model="deepseek-ai/deepseek-v3_2",      # ← Correct name on NVIDIA Catalog
         api_key=NVIDIA_API_KEY,
-         temperature=1,
-        top_p=0.95,
-        max_tokens=8192,
-        extra_body={"chat_template_kwargs": {"thinking":False}},
+        temperature=0.6,
+        max_tokens=1024
     )
 
     embeddings = NVIDIAEmbeddings(
@@ -42,7 +40,7 @@ def initialize_rag():
         api_key=NVIDIA_API_KEY
     )
 
-    # Load documents (safe if folder is empty)
+    # Load resume + blog posts
     print("📂 Loading knowledge base...")
     try:
         pdf_loader = DirectoryLoader("knowledge/", glob="**/*.pdf", loader_cls=PyPDFLoader, show_progress=True)
@@ -50,13 +48,9 @@ def initialize_rag():
         docs = pdf_loader.load() + md_loader.load()
         print(f"✅ Loaded {len(docs)} documents")
     except Exception as e:
-        print(f"⚠️ Document loading warning: {e}. Using empty knowledge base for now.")
+        print(f"⚠️ Document warning: {e}")
         docs = []
 
-    if not docs:
-        print("⚠️ No documents found! Add Sahilsinh_chavda_resume.pdf to knowledge/ folder.")
-
-    # Split & vector store
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
     splits = text_splitter.split_documents(docs)
 
@@ -67,18 +61,18 @@ def initialize_rag():
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
 
-    # RAG chain
+    # RAG prompt
     system_prompt = (
         "You are Sahilsinh Chavda's personal AI assistant. "
-        "Answer ONLY using the provided context from his resume, PMA labs, Drone Forensics Tool, "
-        "teaching experience, and projects. Be professional, concise, and friendly.\n\n"
+        "Answer ONLY using the provided context from his resume, Practical Malware Analysis labs, "
+        "Drone Forensics Tool, teaching experience, and projects. Be professional, concise, and friendly.\n\n"
         "Context: {context}"
     )
     prompt = ChatPromptTemplate.from_messages([("system", system_prompt), ("human", "{input}")])
     question_answer_chain = create_stuff_documents_chain(llm, prompt)
     rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
-    print("🚀 RAG system initialized successfully!")
+    print("🚀 RAG initialized with DeepSeek-V3.2!")
 
 # ====================== ENDPOINTS ======================
 class ChatRequest(BaseModel):
@@ -86,15 +80,14 @@ class ChatRequest(BaseModel):
 
 @app.get("/")
 async def health():
-    return {"status": "alive", "model": "nvidia/llama-3.1-nemotron-70b-instruct"}
+    return {"status": "alive", "model": "deepseek-ai/deepseek-v3_2"}
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
     if not request.message or not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    initialize_rag()   # ← only runs once, safely
-
+    initialize_rag()
     result = rag_chain.invoke({"input": request.message})
     return {"response": result["answer"]}
 
