@@ -9,81 +9,90 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# ====================== CONFIG ======================
 app = FastAPI(title="Sahilsinh RAG Chatbot")
 
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-if not NVIDIA_API_KEY:
-    raise ValueError("NVIDIA_API_KEY environment variable is not set!")
+# ====================== LAZY INIT ======================
+llm = None
+retriever = None
+rag_chain = None
 
-# BEST MODEL FOR YOUR TASK (technical resume + malware/forensics blog)
-llm = ChatNVIDIA(
-    model="nvidia/llama-3.1-nemotron-70b-instruct",   # ← Best choice
-    api_key=NVIDIA_API_KEY,
-    temperature=0.6,
-    max_tokens=1024
-)
+def initialize_rag():
+    global llm, retriever, rag_chain
+    if rag_chain is not None:
+        return  # already initialized
 
-embeddings = NVIDIAEmbeddings(
-    model="nvidia/embed-qa-4",
-    api_key=NVIDIA_API_KEY
-)
+    NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+    if not NVIDIA_API_KEY:
+        raise ValueError("NVIDIA_API_KEY environment variable is missing in Render!")
 
-# ====================== LOAD DOCUMENTS ======================
-print("Loading knowledge base...")
+    print("🔑 Using NVIDIA API Key (starts with):", NVIDIA_API_KEY[:10] + "...")
 
-pdf_loader = DirectoryLoader("knowledge/", glob="**/*.pdf", loader_cls=PyPDFLoader, show_progress=True)
-md_loader  = DirectoryLoader("knowledge/", glob="**/*.md",  loader_cls=TextLoader, loader_kwargs={"encoding": "utf-8"}, show_progress=True)
+    # BEST MODEL FOR RESUME + MALWARE ANALYSIS
+    llm = ChatNVIDIA(
+        model="nvidia/llama-3.1-nemotron-70b-instruct",
+        api_key=NVIDIA_API_KEY,
+        temperature=0.6,
+        max_tokens=1024
+    )
 
-docs = pdf_loader.load() + md_loader.load()
-print(f"Loaded {len(docs)} documents from resume + blog posts")
+    embeddings = NVIDIAEmbeddings(
+        model="nvidia/embed-qa-4",
+        api_key=NVIDIA_API_KEY
+    )
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
-splits = text_splitter.split_documents(docs)
+    # Load documents (safe if folder is empty)
+    print("📂 Loading knowledge base...")
+    try:
+        pdf_loader = DirectoryLoader("knowledge/", glob="**/*.pdf", loader_cls=PyPDFLoader, show_progress=True)
+        md_loader  = DirectoryLoader("knowledge/", glob="**/*.md",  loader_cls=TextLoader, loader_kwargs={"encoding": "utf-8"}, show_progress=True)
+        docs = pdf_loader.load() + md_loader.load()
+        print(f"✅ Loaded {len(docs)} documents")
+    except Exception as e:
+        print(f"⚠️ Document loading warning: {e}. Using empty knowledge base for now.")
+        docs = []
 
-# ====================== VECTOR STORE ======================
-vectorstore = Chroma.from_documents(
-    documents=splits,
-    embedding=embeddings,
-    persist_directory="./chroma_db"
-)
+    if not docs:
+        print("⚠️ No documents found! Add Sahilsinh_chavda_resume.pdf to knowledge/ folder.")
 
-retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
+    # Split & vector store
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+    splits = text_splitter.split_documents(docs)
 
-# ====================== RAG PROMPT ======================
-system_prompt = (
-    "You are Sahilsinh Chavda's personal AI assistant. "
-    "Answer ONLY using the provided context from his resume, Practical Malware Analysis labs, "
-    "Drone Forensics Tool, teaching experience, and projects. "
-    "Be professional, concise, and friendly. Cite specific parts when possible. "
-    "If the answer is not in the context, say 'I don't have that information in my knowledge base.'\n\n"
-    "Context: {context}"
-)
+    vectorstore = Chroma.from_documents(
+        documents=splits,
+        embedding=embeddings,
+        persist_directory="./chroma_db"
+    )
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", system_prompt),
-    ("human", "{input}")
-])
+    # RAG chain
+    system_prompt = (
+        "You are Sahilsinh Chavda's personal AI assistant. "
+        "Answer ONLY using the provided context from his resume, PMA labs, Drone Forensics Tool, "
+        "teaching experience, and projects. Be professional, concise, and friendly.\n\n"
+        "Context: {context}"
+    )
+    prompt = ChatPromptTemplate.from_messages([("system", system_prompt), ("human", "{input}")])
+    question_answer_chain = create_stuff_documents_chain(llm, prompt)
+    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
-question_answer_chain = create_stuff_documents_chain(llm, prompt)
-rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+    print("🚀 RAG system initialized successfully!")
 
-# ====================== API ======================
+# ====================== ENDPOINTS ======================
 class ChatRequest(BaseModel):
     message: str
-
-class ChatResponse(BaseModel):
-    response: str
 
 @app.get("/")
 async def health():
     return {"status": "alive", "model": "nvidia/llama-3.1-nemotron-70b-instruct"}
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat")
 async def chat(request: ChatRequest):
-    if not request.message.strip():
+    if not request.message or not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
-    
+
+    initialize_rag()   # ← only runs once, safely
+
     result = rag_chain.invoke({"input": request.message})
     return {"response": result["answer"]}
 
