@@ -1,6 +1,16 @@
 import os
+import warnings
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+# Suppress Pydantic v1 warning on Python 3.14
+warnings.filterwarnings(
+    "ignore",
+    message="Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater",
+    category=UserWarning,
+    module="langchain_core"
+)
+
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings, ChatNVIDIA
@@ -27,9 +37,9 @@ def initialize_rag():
 
     print("🔑 NVIDIA API Key loaded")
 
-    # DEEPSEEK-V3.2 — Your requested model
+    # DeepSeek-V3.2 (your requested model)
     llm = ChatNVIDIA(
-        model="deepseek-ai/deepseek-v3_2",      # ← Correct name on NVIDIA Catalog
+        model="deepseek-ai/deepseek-v3_2",
         api_key=NVIDIA_API_KEY,
         temperature=0.6,
         max_tokens=1024
@@ -61,11 +71,11 @@ def initialize_rag():
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
 
-    # RAG prompt
     system_prompt = (
         "You are Sahilsinh Chavda's personal AI assistant. "
-        "Answer ONLY using the provided context from his resume, Practical Malware Analysis labs, "
-        "Drone Forensics Tool, teaching experience, and projects. Be professional, concise, and friendly.\n\n"
+        "Answer ONLY using the provided context from his resume, PMA labs, "
+        "Drone Forensics Tool, teaching experience, and projects. "
+        "Be professional, concise, and friendly.\n\n"
         "Context: {context}"
     )
     prompt = ChatPromptTemplate.from_messages([("system", system_prompt), ("human", "{input}")])
