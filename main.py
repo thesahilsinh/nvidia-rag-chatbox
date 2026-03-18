@@ -3,10 +3,10 @@ import warnings
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# Suppress Pydantic v1 warning on Python 3.14
+# Suppress annoying Pydantic v1 warning on Python 3.14 / 3.12
 warnings.filterwarnings(
     "ignore",
-    message="Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater",
+    message="Core Pydantic V1 functionality isn't compatible",
     category=UserWarning,
     module="langchain_core"
 )
@@ -16,8 +16,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings, ChatNVIDIA
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+
+# NEW CORRECT IMPORTS FOR LANGCHAIN 0.3+
+from langchain.chains.retrieval import create_retrieval_chain
+from langchain.chains.combine_documents.stuff import create_stuff_documents_chain
 
 app = FastAPI(title="Sahilsinh RAG Chatbot")
 
@@ -37,7 +39,7 @@ def initialize_rag():
 
     print("🔑 NVIDIA API Key loaded")
 
-    # DeepSeek-V3.2 (your requested model)
+    # DeepSeek-V3.2 (best available on NVIDIA right now)
     llm = ChatNVIDIA(
         model="deepseek-ai/deepseek-v3_2",
         api_key=NVIDIA_API_KEY,
@@ -50,7 +52,6 @@ def initialize_rag():
         api_key=NVIDIA_API_KEY
     )
 
-    # Load resume + blog posts
     print("📂 Loading knowledge base...")
     try:
         pdf_loader = DirectoryLoader("knowledge/", glob="**/*.pdf", loader_cls=PyPDFLoader, show_progress=True)
@@ -79,10 +80,11 @@ def initialize_rag():
         "Context: {context}"
     )
     prompt = ChatPromptTemplate.from_messages([("system", system_prompt), ("human", "{input}")])
+
     question_answer_chain = create_stuff_documents_chain(llm, prompt)
     rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
-    print("🚀 RAG initialized with DeepSeek-V3.2!")
+    print("🚀 RAG initialized successfully with DeepSeek-V3.2!")
 
 # ====================== ENDPOINTS ======================
 class ChatRequest(BaseModel):
